@@ -1,0 +1,99 @@
+#!/bin/sh
+
+# default settings
+TARGET_PORT=22
+MAX_RETRIES=200
+WAIT_SECONDS=0
+VERBOSE=0
+
+# parse arguments
+if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    man waitforit.1 || ronn -r <README.md | man -l -
+    exit
+else
+    TARGET_HOST="$1"
+    case "$TARGET_HOST" in
+    '' | *['!&()'@#$%^*+]*)
+        echo "TARGET_HOST is not a hostname"
+        exit 1
+        ;;
+    esac
+fi
+
+if [ -n "$2" ]; then
+    TARGET_PORT="$2"
+    case "$TARGET_PORT" in
+    '' | *[!0-9]*)
+        echo "TARGET_PORT is not a number"
+        exit 1
+        ;;
+    esac
+fi
+
+if [ -n "$3" ]; then
+    MAX_RETRIES="$3"
+    case "$MAX_RETRIES" in
+    '' | *[!0-9]*)
+        echo "MAX_RETRIES is not a number"
+        exit 1
+        ;;
+    esac
+fi
+
+if [ -n "$4" ]; then
+    WAIT_SECONDS="$4"
+    case "$WAIT_SECONDS" in
+    '' | *[!0-9]*)
+        echo "WAIT_SECONDS is not a number"
+        exit 1
+        ;;
+    esac
+fi
+
+if [ "$5" = "-v" ]; then
+    VERBOSE=1
+fi
+
+# check requirements
+if [ -z "$(command -v socat)" ]; then
+    echo "socat is not installed, please install"
+    exit 1
+fi
+
+# initial wait
+sleep "$WAIT_SECONDS"
+
+# probe for connection
+for _ in $(seq 1 "$MAX_RETRIES"); do
+    SSH_CONNECTION=$(socat -T2 stdout \
+        tcp:"$TARGET_HOST":"$TARGET_PORT",connect-timeout=2,readbytes=3 2>&1)
+
+    # verbose
+    if [ "$VERBOSE" = 1 ]; then
+        echo "$SSH_CONNECTION"
+    fi
+
+    # correct response
+    if [ "$SSH_CONNECTION" = "SSH" ]; then
+        exit 0
+    # host is there but timeout
+    elif echo "$SSH_CONNECTION" | grep -q "Connection timed out"; then
+        sleep 3
+    # host is there but port is not ready
+    elif echo "$SSH_CONNECTION" | grep -q "Connection refused"; then
+        sleep 3
+    # services header is empty
+    elif [ -z "$SSH_CONNECTION" ]; then
+        sleep 3
+    # abort on no route
+    elif echo "$SSH_CONNECTION" | grep -q "Name or service not known"; then
+        echo "No route to host or network"
+        exit 1
+    elif [ "$SSH_CONNECTION" != "SSH" ]; then
+        echo "Unknown connection error"
+        exit 1
+    fi
+
+done
+echo "Connection try limit exceeded"
+exit 1
