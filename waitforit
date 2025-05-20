@@ -87,10 +87,14 @@ for _ in $(seq 1 "$MAX_RETRIES"); do
         sleep 3
     # abort on no route
     elif echo "$SSH_CONNECTION" | grep -q "Name or service not known"; then
+        echo "No route to host or network, name or service not known"
+        exit 1
+    # abort on no route
+    elif echo "$SSH_CONNECTION" | grep -q "No route to host"; then
         echo "No route to host or network"
         exit 1
-    elif [ "$SSH_CONNECTION" != "SSH" ]; then
-        echo "Unknown connection error"
+    else
+        echo "Unknown connection error: $SSH_CONNECTION"
         exit 1
     fi
 

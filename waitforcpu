@@ -1,0 +1,70 @@
+#!/bin/sh
+# this script waits for the CPU to be below a certain threshold, then exits
+# shellcheck disable=SC2039
+
+set -e
+
+# parse arguments
+if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    man waitforit.1 || ronn -r <README.md | man -l -
+    exit
+fi
+
+error() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+# args
+MIN_FREE_CPU="$1"
+[ -z "$MIN_FREE_CPU" ] && error "No CPU threshold given"
+TIMEOUT="$2"
+[ -z "$TIMEOUT" ] && TIMEOUT=200
+WAIT_SECONDS="$3"
+[ -z "$WAIT_SECONDS" ] && WAIT_SECONDS=0
+VERBOSE="$4"
+[ -z "$VERBOSE" ] && VERBOSE=0
+
+get_cpu() {
+    local CURRENT
+    CURRENT=$(top -bn1 |
+        grep "Cpu(s)" |
+        sed "s/.*, *\([0-9.]*\)%* id.*/\1/" |
+        awk '{print 100 - $1}') || error "get_cpu from top"
+    # make sure CURRENT is a number
+    if echo "$CURRENT" | grep -q "^[0-9.]\+$"; then
+        echo "$CURRENT"
+    else
+        error "Failed to get CPU usage"
+    fi
+}
+
+# initial wait
+sleep "$WAIT_SECONDS"
+
+# run get_cpu 3 times with 1 second in between
+# calculate the average, if the average is below the threshold, exit
+# also abort if x seconds has gone by
+# run this all in a loop and errir if TIMEOUT is reached
+
+# get current date and save to a variable
+NOW=$(date +%s)
+
+# if current date is more than TIMEOUT seconds from the NOW date, exit
+while [ "$(date +%s)" -lt "$((NOW + TIMEOUT))" ]; do
+    CPU_TOTAL=0
+    WILL_TIMEOUT=$((NOW + TIMEOUT - $(date +%s)))
+    # get the average CPU usage
+    for _ in $(seq 1 3); do
+        CPU_TOTAL=$(echo "$CPU_TOTAL + $(get_cpu)" | bc)
+        sleep 1
+    done
+    CPU_AVERAGE=$(echo "scale=2; $CPU_TOTAL / 3" | bc)
+    [ -n "$VERBOSE" ] && echo "CPU average: $CPU_AVERAGE timeout: $WILL_TIMEOUT"
+    if [ "$(echo "$CPU_AVERAGE < $MIN_FREE_CPU" | bc)" -eq 1 ]; then
+        exit
+    fi
+done
+echo "CPU usage did not get below $MIN_FREE_CPU% in under $TIMEOUT seconds."
+echo "Too demanding processes or insufficient system resources to continue."
+exit 1
